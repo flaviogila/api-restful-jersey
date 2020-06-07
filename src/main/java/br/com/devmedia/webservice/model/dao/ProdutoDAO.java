@@ -7,23 +7,26 @@ import javax.persistence.EntityManager;
 import br.com.devmedia.webservice.model.dao.JPAUtil;
 import br.com.devmedia.webservice.exceptions.DAOException;
 import br.com.devmedia.webservice.exceptions.ErrorCode;
+import br.com.devmedia.webservice.model.domain.Marca;
 import br.com.devmedia.webservice.model.domain.Produto;
 
 public class ProdutoDAO {
 
 
-	public List<Produto> getAll() {
+	public List<Produto> getAll(long marcaId) {
 		EntityManager em = JPAUtil.getEntityManager();
-		List<Produto> produtos = null;
-		
+		List<Produto> produtos;
+
 		try {
-			produtos = em.createQuery("select p from Produto p", Produto.class).getResultList();
+			produtos = em.createQuery("select p from Produto p where p.marca.id = :marcaId", Produto.class)
+					.setParameter("marcaId", marcaId)
+					.getResultList();
 		} catch (RuntimeException ex) {
 			throw new DAOException("Erro ao recuperar todos os produtos do banco: " + ex.getMessage(), ErrorCode.SERVER_ERROR.getCode());
 		} finally {
 			em.close();
 		}
-		
+
 		return produtos;
 	}
 	
@@ -48,48 +51,60 @@ public class ProdutoDAO {
 		}
 		
 		return produto; 
-	}	
+	}
 
-	public Produto save(Produto produto) {
+	public Produto save(long marcaId, Produto produto) {
 		EntityManager em = JPAUtil.getEntityManager();
-		
+		Marca marca;
+
 		if (!produtoIsValid(produto)) {
 			throw new DAOException("Produto com dados incompletos.", ErrorCode.BAD_REQUEST.getCode());
 		}
-		
+
 		try {
 			em.getTransaction().begin();
+			marca = em.find(Marca.class, marcaId);
+			marca.getProdutos().add(produto);
+			produto.setMarca(marca);
 			em.persist(produto);
-			em.getTransaction().commit(); 
+			em.getTransaction().commit();
+		} catch (NullPointerException ex) {
+			em.getTransaction().rollback();
+			throw new DAOException("Marca informada não existe: " + ex.getMessage(), ErrorCode.NOT_FOUND.getCode());
 		} catch (RuntimeException ex) {
 			em.getTransaction().rollback();
-            throw new DAOException("Erro ao salvar produto no banco de dados: " + ex.getMessage(), ErrorCode.SERVER_ERROR.getCode());
+			throw new DAOException("Erro ao salvar produto no banco de dados: " + ex.getMessage(), ErrorCode.SERVER_ERROR.getCode());
 		} finally {
 			em.close();
 		}
 		return produto;
 	}
-	
-	public Produto update(Produto produto) {
+
+	public Produto update(long marcaId, Produto produto) {
 		EntityManager em = JPAUtil.getEntityManager();
-		Produto produtoManaged = null;
-		
+		Produto produtoManaged;
+
 		if (produto.getId() <= 0) {
 			throw new DAOException("O id precisa ser maior do que 0.", ErrorCode.BAD_REQUEST.getCode());
 		}
 		if (!produtoIsValid(produto)) {
 			throw new DAOException("Produto com dados incompletos.", ErrorCode.BAD_REQUEST.getCode());
 		}
-		
+
 		try {
 			em.getTransaction().begin();
 			produtoManaged = em.find(Produto.class, produto.getId());
 			produtoManaged.setNome(produto.getNome());
 			produtoManaged.setQuantidade(produto.getQuantidade());
+			if (produtoManaged.getMarca().getId() != marcaId) {
+				Marca marca = em.find(Marca.class, marcaId);
+				produtoManaged.setMarca(marca);
+				marca.getProdutos().add(produtoManaged);
+			}
 			em.getTransaction().commit();
 		} catch (NullPointerException ex) {
 			em.getTransaction().rollback();
-			throw new DAOException("Produto informado para atualização não existe: " + ex.getMessage(), ErrorCode.NOT_FOUND.getCode());
+			throw new DAOException("Marca ou produto informado para atualização não existe: " + ex.getMessage(), ErrorCode.NOT_FOUND.getCode());
 		} catch (RuntimeException ex) {
 			em.getTransaction().rollback();
 			throw new DAOException("Erro ao atualizar produto no banco de dados: " + ex.getMessage(), ErrorCode.SERVER_ERROR.getCode());
@@ -136,12 +151,13 @@ public class ProdutoDAO {
 		return true;
 	}
 
-	public List<Produto> getByPagination(int firstResult, int maxResults) {
+	public List<Produto> getByPagination(long marcaId, int firstResult, int maxResults) {
 		List<Produto> produtos;
 		EntityManager em = JPAUtil.getEntityManager();
-		 		
+
 		try {
-			produtos = em.createQuery("select p from Produto p", Produto.class)
+			produtos = em.createQuery("select p from Produto p where p.marca.id = :marcaId", Produto.class)
+					.setParameter("marcaId", marcaId)
 					.setFirstResult(firstResult - 1)
 					.setMaxResults(maxResults)
 					.getResultList();
@@ -150,33 +166,34 @@ public class ProdutoDAO {
 		} finally {
 			em.close();
 		}
-		
+
 		if (produtos.isEmpty()) {
 			throw new DAOException("Página com produtos vazia.", ErrorCode.NOT_FOUND.getCode());
 		}
-		
+
 		return produtos;
 	}
-	
-	public List<Produto> getByName(String name) {
+
+	public List<Produto> getByName(long marcaId, String name) {
 		EntityManager em = JPAUtil.getEntityManager();
-		List<Produto> produtos = null;
-		
+		List<Produto> produtos;
+
 		try {
-			produtos = em.createQuery("select p from Produto p where p.nome like :name", Produto.class)
+			produtos = em.createQuery("select p from Produto p where p.marca.id = :marcaId and p.nome like :name", Produto.class)
+					.setParameter("marcaId", marcaId)
 					.setParameter("name", "%" + name + "%")
-					.getResultList();	
+					.getResultList();
 		} catch (RuntimeException ex) {
 			throw new DAOException("Erro ao buscar produtos por nome no banco de dados: " + ex.getMessage(), ErrorCode.SERVER_ERROR.getCode());
 		} finally {
 			em.close();
 		}
-		
+
 		if (produtos.isEmpty()) {
 			throw new DAOException("A consulta não encontrou produtos.", ErrorCode.NOT_FOUND.getCode());
 		}
-		
+
 		return produtos;
 	}
-	
+
 }
